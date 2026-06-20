@@ -106,7 +106,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     tax:{ uri:6400000, keihi:960000, nenkin:210000, kokuho2026:17000, kyosaiY:120000, idecoY:0, genzen:560000,
       jigyoTax:true, rJuminzei:0.10, juminFlat:6000, rKokuho:0.096, kokuhoFlat:55000, kokuhoCap:890000 } };
   var state=JSON.parse(JSON.stringify(DEF));
-  var mem=null, active='dash', selMonth=null, lastImport='', dashMonth='';
+  var mem=null, active='dash', selMonth=null, lastImport='', dashMonth='', dashChart='bars';
 
   function $(id){return document.getElementById(id);}
   function yen(n){return '¥'+Math.round(n).toLocaleString();}
@@ -269,6 +269,33 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     s+='</svg>';
     return s;
   }
+  function cfSeries(year){
+    var opening=+(state.startBalance||0), now=nowKey();
+    Object.keys(state.months).forEach(function(k){ if(k>=state.start&&k<=now&&k<year+'-01'){var l=ledgerOf(k);opening+=l.income-l.exp-l.kyosai-l.nisa;} });
+    var pts=[],run=opening;
+    for(var mo=1;mo<=12;mo++){var k=year+'-'+pad(mo);var has=!!state.months[k]&&k>=state.start&&k<=now;
+      if(has){var l=ledgerOf(k);run+=l.income-l.exp-l.kyosai-l.nisa;}
+      pts.push({mo:mo,v:run,has:has});}
+    return {pts:pts,opening:opening};
+  }
+  function buildCfLine(year,selMo){
+    var ser=cfSeries(year),pts=ser.pts,vals=pts.map(function(p){return p.v;}).concat([ser.opening]);
+    var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals); if(mn===mx){mn-=1;mx+=1;}
+    var W=340,H=188,pT=12,pB=18,pL=8,pR=8,pw=W-pL-pR,pH=H-pT-pB,gap=pw/12;
+    function X(i){return pL+gap*i+gap/2;} function Y(v){return pT+pH*(1-(v-mn)/(mx-mn));}
+    var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;">';
+    if(mn<0&&mx>0){var zy=Y(0);s+='<line x1="'+pL+'" y1="'+zy.toFixed(1)+'" x2="'+(W-pR)+'" y2="'+zy.toFixed(1)+'" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 2"/>';}
+    var pl=pts.map(function(p,i){return X(i).toFixed(1)+','+Y(p.v).toFixed(1);}).join(' ');
+    s+='<polyline points="'+pl+'" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+    pts.forEach(function(p,i){var on=(p.mo===selMo);
+      if(on)s+='<rect x="'+(X(i)-gap/2+1).toFixed(1)+'" y="'+pT+'" width="'+(gap-2).toFixed(1)+'" height="'+pH.toFixed(1)+'" fill="var(--accent)" opacity="0.12" rx="5"/>';
+      s+='<circle cx="'+X(i).toFixed(1)+'" cy="'+Y(p.v).toFixed(1)+'" r="'+(on?3.5:1.8)+'" fill="var(--accent)"/>';
+      s+='<text x="'+X(i).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="8.5" fill="'+(on?'var(--accent)':'var(--faint)')+'" style="font-weight:'+(on?'700':'400')+';">'+p.mo+'</text>';
+      s+='<rect x="'+(X(i)-gap/2).toFixed(1)+'" y="0" width="'+gap.toFixed(1)+'" height="'+H+'" fill="transparent" style="cursor:pointer;" data-mo="'+p.mo+'"></rect>';
+    });
+    s+='</svg>';
+    return s;
+  }
   function renderDash(){
     var c=curCum(), g=activeGoal(), tc=taxCalc(), cf=cashflow();
     var now=nowKey();
@@ -302,8 +329,14 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     var present={}; for(var mo=1;mo<=12;mo++){var k=year+'-'+pad(mo);var r=state.months[k];if(r&&r.exp)r.exp.forEach(function(x){present[catKey(x)]=1;});}
     var legend='<span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:#36B37E;display:inline-block;"></span>収入</span>';
     Object.keys(present).forEach(function(cc){legend+=' <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:'+catColor(cc)+';display:inline-block;"></span>'+cc+'</span>';});
-    var bars='<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;"><p class="eb">月次の収支（'+year+'年）</p><span style="font-size:11px;color:var(--faint);">月をタップで切替</span></div>'+buildBars(year,selMo)
-      +'<div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px;font-size:11px;color:var(--muted);">'+legend+'</div></div>';
+    var isCF=(dashChart==='cf');
+    var chTitle=isCF?'累積キャッシュフロー（'+year+'年）':'月次の収支（'+year+'年）';
+    var chBtn=isCF?'棒グラフ':'累積CF';
+    var chSvg=isCF?buildCfLine(year,selMo):buildBars(year,selMo);
+    var chFoot=isCF
+      ?'<div style="font-size:11px;color:var(--muted);margin-top:8px;">年初残高 ＋ 収入 − 支出 − 共済・NISA の累積 ・ '+label(selKey)+'末 <span style="color:var(--text);font-weight:600;">'+yen(cfSeries(year).pts[selMo-1].v)+'</span></div>'
+      :'<div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px;font-size:11px;color:var(--muted);">'+legend+'</div>';
+    var bars='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;"><p class="eb" style="margin:0;">'+chTitle+'</p><button id="chToggle" class="chip" style="font-size:11px;padding:4px 12px;">'+chBtn+'</button></div><div style="margin-top:10px;">'+chSvg+'</div>'+chFoot+'</div>';
     // 支出の内訳（選択中の月）
     var bdMonth=selKey;
     var rNow=state.months[bdMonth], byc={},tot=0;
@@ -330,6 +363,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
       +'<div class="row"><span class="l">2027の税の山（概算）</span><span class="num">'+man(tc.mountain)+'</span></div>'
       +'<div class="row"><span class="l">予備＋還付との差</span><span class="num" style="color:'+(tc.gap>=0?'var(--accent)':'var(--warn)')+';">'+(tc.gap>=0?'＋':'−')+man(Math.abs(tc.gap))+'</span></div></div>';
     $('dash').innerHTML=hero+summary+bars+expCard+chart+balance+breakdown;
+    var tg=$('chToggle'); if(tg)tg.addEventListener('click',function(){dashChart=(dashChart==='cf'?'bars':'cf');renderDash();});
     document.querySelectorAll('#dash [data-mo]').forEach(function(el){el.addEventListener('click',function(){dashMonth=year+'-'+pad(+el.dataset.mo);renderDash();});});
   }
 
@@ -446,8 +480,23 @@ textarea{width:100%;min-height:90px;resize:vertical;}
 
   /* ---------- SETTINGS ---------- */
   function renderSet(){
+    var yy=parseKey(nowKey()).y, tInc=0,tExp=0,mrows='';
+    for(var mo=1;mo<=12;mo++){var k=yy+'-'+pad(mo);var r=state.months[k];if(!r)continue;var l=ledgerOf(k);tInc+=l.income;tExp+=l.exp;var b=l.income-l.exp;
+      mrows+='<div class="row"><span class="l">'+label(k)+'</span><span class="num" style="font-size:12px;font-variant-numeric:tabular-nums;">'+yen(l.income)+' / −'+yen(l.exp)+' <span style="color:'+(b>=0?'var(--accent)':'var(--warn)')+';">'+(b<0?'−':'＋')+yen(Math.abs(b))+'</span></span></div>';}
+    var dataCard='<div class="card"><p class="eb">月別データ（収入 / 支出 / 収支）'+yy+'年</p>'+(mrows||'<p class="note">入力済みの月がありません。</p>')
+      +'<div class="row tot"><span>年間 合計</span><span class="num" style="font-size:12px;font-variant-numeric:tabular-nums;">'+yen(tInc)+' / −'+yen(tExp)+' <span style="color:'+((tInc-tExp)>=0?'var(--accent)':'var(--warn)')+';">'+((tInc-tExp)<0?'−':'＋')+yen(Math.abs(tInc-tExp))+'</span></span></div>'
+      +'<p class="note" style="margin-top:6px;">各月の収入はデフォルトで37万が入ります（取り込みや手入力で上書きされていない月）。実態と違う月はこの値を直してください。</p></div>';
+    var cf=cashflow();
+    var bridge='<div class="card"><p class="eb">手元残高のブリッジ（収支と残高はなぜ違う？）</p>'
+      +'<div class="row"><span class="l">年初残高</span><span class="num">'+yen(state.startBalance||0)+'</span></div>'
+      +'<div class="row"><span class="l">＋ 収入</span><span class="num">'+yen(cf.inc)+'</span></div>'
+      +'<div class="row"><span class="l">− 支出</span><span class="num">−'+yen(cf.exp)+'</span></div>'
+      +'<div class="row"><span class="l">− 共済・NISA 拠出</span><span class="num">−'+yen(cf.contrib)+'</span></div>'
+      +'<div class="row tot"><span>＝ 手元の残高</span><span class="num">'+yen(cf.bal)+'</span></div>'
+      +'<p class="note" style="margin-top:6px;">「年間収支」は収入−支出だけの数字です。税の源泉徴収・別口座への移動・パートナーとの折半・年初残高は含みません。大きなスポット収入（PMO等）は額面が収入に乗るので収支は大きく出ますが、その多くは源泉・貯蓄・別管理で手元には残らず、差として現れます。</p></div>';
     $('set').innerHTML=
-      '<div class="card"><p class="eb">手元現金の開始残高</p>'
+      dataCard+bridge
+      +'<div class="card"><p class="eb">手元現金の開始残高</p>'
       +'<div class="fr"><span class="l">'+label(state.start)+'時点の残高</span><input type="number" id="sb" step="10000" value="'+(state.startBalance||0)+'"></div>'
       +'<p class="note">「概要」の手元の残高は、これ＋収入−支出−共済・NISA拠出で計算します。今の口座残高に合わせて調整してください。</p></div>'
       +'<div class="card"><p class="eb">税の予備枠（隔離）</p>'
