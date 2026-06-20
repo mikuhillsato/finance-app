@@ -65,9 +65,10 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   <header>
     <p class="brand">Money <span class="flag" id="flag">保存しました</span></p>
     <div class="tabs">
-      <button class="tab on" data-t="dash">ダッシュボード</button>
+      <button class="tab on" data-t="dash">概要</button>
       <button class="tab" data-t="input">入力</button>
-      <button class="tab" data-t="goals">貯金・ゴール</button>
+      <button class="tab" data-t="goals">貯金</button>
+      <button class="tab" data-t="tax">税</button>
       <button class="tab" data-t="set">設定</button>
     </div>
   </header>
@@ -75,6 +76,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     <div id="dash"></div>
     <div id="input" style="display:none;"></div>
     <div id="goals" style="display:none;"></div>
+    <div id="tax" style="display:none;"></div>
     <div id="set" style="display:none;"></div>
   </main>
 </div>
@@ -84,7 +86,9 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   var KEY='finance:v1';
   var THRESHOLDS=[900000,2150000,2750000,3250000];
   var GNAMES=['生活防衛 90万','結婚 125万','生活防衛 ＋60万','出産 50万'];
-  var DEF={ start:'2026-06', taxReserve:375000, planCash:60000, planKyosai:10000, planNisa:10000, months:{} };
+  var DEF={ start:'2026-01', taxReserve:375000, planCash:60000, planKyosai:10000, planNisa:10000, months:{},
+    tax:{ uri:4780000, keihi:960000, nenkin:210000, kokuho2026:17000, kyosaiY:120000, idecoY:0, genzen:340000,
+      jigyoTax:true, rJuminzei:0.10, juminFlat:6000, rKokuho:0.096, kokuhoFlat:55000, kokuhoCap:890000 } };
   var state=JSON.parse(JSON.stringify(DEF));
   var mem=null, active='dash', selMonth=null;
 
@@ -153,6 +157,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   function load(){
     try{ var v=localStorage.getItem(KEY); if(v){ state=Object.assign(JSON.parse(JSON.stringify(DEF)),JSON.parse(v)); } }
     catch(e){ if(mem)state=mem; }
+    state.tax=Object.assign(JSON.parse(JSON.stringify(DEF.tax)), state.tax||{});
   }
 
   /* ---------- DASHBOARD ---------- */
@@ -181,6 +186,8 @@ textarea{width:100%;min-height:90px;resize:vertical;}
       +'<div class="mini"><div class="v">'+man(c.ky)+'</div><div class="k">共済（老後）</div></div>'
       +'</div>'
       +'<div class="row" style="margin-top:10px;"><span class="l">2027税の予備（隔離）</span><span class="num">'+man(state.taxReserve)+'</span></div>'
+      +'<div class="row"><span class="l">2027の税の山（概算）</span><span class="num">'+man(taxCalc().mountain)+'</span></div>'
+      +'<div class="row"><span class="l">予備＋還付との差</span><span class="num" style="color:'+(taxCalc().gap>=0?'var(--accent)':'var(--warn)')+';">'+(taxCalc().gap>=0?'＋':'−')+man(Math.abs(taxCalc().gap))+'</span></div>'
       +'<p class="note" style="margin-top:6px;">NISAは生活防衛90万の達成後にゴールへ充当。共済と税予備はゴールの計算には含めません。</p>'
       +'</div>';
     var cm=nowKey(), lo=ledgerOf(cm);
@@ -300,16 +307,91 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     $('tr').addEventListener('input',function(){state.taxReserve=+this.value||0;save();renderDash();});
     $('st').addEventListener('change',function(){state.start=this.value;save();renderInput();renderGoals();renderDash();});
     $('exp').addEventListener('click',function(){var t=$('bk');t.style.display='block';t.value=JSON.stringify(state);t.select();try{navigator.clipboard.writeText(t.value);}catch(e){}});
-    $('impbtn').addEventListener('click',function(){try{var o=JSON.parse($('impbox').value);state=Object.assign(JSON.parse(JSON.stringify(DEF)),o);save();renderAll();switchTab('dash');}catch(e){$('impbox').style.outline='2px solid var(--warn)';}});
+    $('impbtn').addEventListener('click',function(){try{var o=JSON.parse($('impbox').value);state=Object.assign(JSON.parse(JSON.stringify(DEF)),o);state.tax=Object.assign(JSON.parse(JSON.stringify(DEF.tax)),state.tax||{});save();renderAll();switchTab('dash');}catch(e){$('impbox').style.outline='2px solid var(--warn)';}});
     $('rs').addEventListener('click',function(){state=JSON.parse(JSON.stringify(DEF));selMonth=null;save();renderAll();switchTab('dash');});
   }
 
-  function renderAll(){ renderDash(); renderInput(); renderGoals(); renderSet(); }
+  /* ---------- TAX ENGINE (フェーズ2・概算) ---------- */
+  function shotokuzei(x){var t;if(x<=1950000)t=x*0.05;else if(x<=3300000)t=x*0.10-97500;else if(x<=6950000)t=x*0.20-427500;else if(x<=9000000)t=x*0.23-636000;else if(x<=18000000)t=x*0.33-1536000;else t=x*0.40-2796000;return Math.max(0,Math.round(t*1.021));}
+  function taxCalc(){
+    var t=state.tax, aoiro=650000;
+    var jigyo=Math.max(0,t.uri-t.keihi-aoiro);
+    var shaho=t.nenkin+t.kokuho2026;
+    var ded=t.kyosaiY+t.idecoY;
+    var csShotoku=Math.max(0,jigyo-(480000+shaho+ded));
+    var income=shotokuzei(csShotoku);
+    var refund=t.genzen-income; // +なら還付
+    var csJumin=Math.max(0,jigyo-(430000+shaho+ded));
+    var jumin=Math.round(csJumin*t.rJuminzei+t.juminFlat);
+    var kokuho=Math.min(t.kokuhoCap,Math.round(Math.max(0,jigyo-430000)*t.rKokuho+t.kokuhoFlat));
+    var jigyoZei=t.jigyoTax?Math.round(Math.max(0,jigyo-2900000)*0.05):0;
+    var mountain=jumin+kokuho+jigyoZei;
+    var reserve=state.taxReserve+Math.max(0,refund);
+    return {jigyo:jigyo,income:income,refund:refund,jumin:jumin,kokuho:kokuho,jigyoZei:jigyoZei,mountain:mountain,reserve:reserve,gap:reserve-mountain};
+  }
+
+  /* ---------- TAX TAB ---------- */
+  function renderTax(){
+    var t=state.tax, r=taxCalc();
+    function row(l,v,col){return '<div class="row"><span class="l">'+l+'</span><span class="num"'+(col?' style="color:'+col+';"':'')+'>'+v+'</span></div>';}
+    function inp(id,val,step){return '<input type="number" id="'+id+'" step="'+(step||10000)+'" value="'+val+'">';}
+    $('tax').innerHTML=
+      '<div class="card"><p class="eb">2027に来る税の山（概算）</p>'
+      +'<p class="big" style="font-size:38px;color:var(--warn);">'+man(r.mountain)+'</p>'
+      +'<p class="cap">2026の所得をもとに、2027に請求される住民税・国保・個人事業税の合計</p>'
+      +'<div style="margin-top:12px;">'
+      +row('住民税（2027/6〜）',yen(r.jumin))
+      +row('国民健康保険（2027/6〜）',yen(r.kokuho))
+      +(r.jigyoZei>0?row('個人事業税（2027/8）',yen(r.jigyoZei)):'')
+      +'</div>'
+      +'<div class="row tot"><span>'+(r.gap>=0?'予備＋還付で足りる':'予備＋還付では不足')+'</span><span class="num" style="color:'+(r.gap>=0?'var(--accent)':'var(--warn)')+';">'+(r.gap>=0?'＋':'−')+man(Math.abs(r.gap))+'</span></div>'
+      +'<p class="note" style="margin-top:6px;">取り置き原資＝税予備 '+man(state.taxReserve)+' ＋ 所得税の還付見込み '+man(Math.max(0,r.refund))+'。</p></div>'
+
+      +'<div class="card"><p class="eb">2026 所得税の精算</p>'
+      +row('事業所得（売上−経費−青色65万）',yen(r.jigyo))
+      +row('所得税（概算）',yen(r.income))
+      +row('源泉徴収済み',yen(t.genzen))
+      +'<div class="row tot"><span>'+(r.refund>=0?'還付（戻ってくる）':'追納（払う）')+'</span><span class="num" style="color:'+(r.refund>=0?'var(--accent)':'var(--warn)')+';">'+(r.refund>=0?'＋':'−')+yen(Math.abs(r.refund))+'</span></div>'
+      +'<p class="note" style="margin-top:6px;">確定申告（2027年3月）で精算。源泉が多ければ還付されます。</p></div>'
+
+      +'<div class="card"><p class="eb">2026の収入・控除（入力）</p>'
+      +'<div class="fr"><span class="l">年間売上</span>'+inp('t_uri',t.uri)+'</div>'
+      +'<div class="fr"><span class="l">年間経費</span>'+inp('t_keihi',t.keihi)+'</div>'
+      +'<div class="fr"><span class="l">国民年金（年）</span>'+inp('t_nenkin',t.nenkin,1000)+'</div>'
+      +'<div class="fr"><span class="l">国保（2026に払う・年）</span>'+inp('t_kokuho26',t.kokuho2026,1000)+'</div>'
+      +'<div class="fr"><span class="l">小規模企業共済（年）</span>'+inp('t_kyosai',t.kyosaiY,1000)+'</div>'
+      +'<div class="fr"><span class="l">iDeCo（年）</span>'+inp('t_ideco',t.idecoY,1000)+'</div>'
+      +'<div class="fr"><span class="l">源泉徴収済み（年）</span>'+inp('t_genzen',t.genzen,1000)+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:6px;"><button class="btn ghost" id="t_pull" style="flex:1;">2026の実績を合計</button><button class="btn ghost" id="t_est" style="flex:1;">月平均×12で見積もる</button></div>'
+      +'<p class="note" id="t_pullnote" style="margin-top:6px;"></p>'
+      +'<p class="note" style="margin-top:2px;">取り込みは2026年（1〜12月）の記録のみを対象に合算。売上＝定常の受取ベース（CFD源泉前を含むのが正確）。経費は「経費」カテゴリで記録した支出。</p></div>'
+
+      +'<div class="card"><p class="eb">詳細設定（自治体の料率）</p>'
+      +'<div class="fr"><span class="l">個人事業税の対象</span><select id="t_jt"><option value="1"'+(t.jigyoTax?' selected':'')+'>対象</option><option value="0"'+(!t.jigyoTax?' selected':'')+'>対象外</option></select></div>'
+      +'<div class="fr"><span class="l">住民税率</span><input type="number" id="t_rj" step="0.01" value="'+t.rJuminzei+'"></div>'
+      +'<div class="fr"><span class="l">国保 所得割率</span><input type="number" id="t_rk" step="0.001" value="'+t.rKokuho+'"></div>'
+      +'<div class="fr"><span class="l">国保 均等割等（年）</span><input type="number" id="t_kf" step="1000" value="'+t.kokuhoFlat+'"></div>'
+      +'<p class="note" style="margin-top:6px;">初期値は東京・三鷹あたりの概算（40歳未満・介護分なし）。正確な料率は自治体の通知に合わせて調整してください。すべて概算で、確定額ではありません。</p></div>';
+
+    function bind(id,key,parse){var e=$(id);if(!e)return;e.addEventListener('input',function(){state.tax[key]=parse?parse(this.value):(+this.value||0);save();renderTax();renderDash();});}
+    bind('t_uri','uri');bind('t_keihi','keihi');bind('t_nenkin','nenkin');bind('t_kokuho26','kokuho2026');
+    bind('t_kyosai','kyosaiY');bind('t_ideco','idecoY');bind('t_genzen','genzen');
+    bind('t_rj','rJuminzei',function(v){return +v||0;});bind('t_rk','rKokuho',function(v){return +v||0;});bind('t_kf','kokuhoFlat');
+    $('t_jt').addEventListener('change',function(){state.tax.jigyoTax=this.value==='1';save();renderTax();renderDash();});
+    function sum2026(){var inc=0,kei=0,n=0;Object.keys(state.months).forEach(function(m){if(m.slice(0,4)!=='2026')return;n++;var l=ledgerOf(m);inc+=l.income;(state.months[m].exp||[]).forEach(function(x){if((x.cat||'').indexOf('経費')>=0)kei+=(+x.amt||0);});});return {inc:inc,kei:kei,n:n};}
+    var s26=sum2026();
+    $('t_pullnote').textContent='2026年の記録：'+s26.n+'ヶ月分（売上 '+yen(s26.inc)+' ・ 経費 '+yen(s26.kei)+'）';
+    $('t_pull').addEventListener('click',function(){var s=sum2026();if(s.inc>0)state.tax.uri=s.inc;if(s.kei>0)state.tax.keihi=s.kei;save();renderTax();renderDash();});
+    $('t_est').addEventListener('click',function(){var s=sum2026();if(s.n>0){if(s.inc>0)state.tax.uri=Math.round(s.inc/s.n*12);if(s.kei>0)state.tax.keihi=Math.round(s.kei/s.n*12);}save();renderTax();renderDash();});
+  }
+
+  function renderAll(){ renderDash(); renderInput(); renderGoals(); renderTax(); renderSet(); }
   function switchTab(t){
     active=t;
-    ['dash','input','goals','set'].forEach(function(x){$(x).style.display=(x===t)?'block':'none';});
+    ['dash','input','goals','tax','set'].forEach(function(x){$(x).style.display=(x===t)?'block':'none';});
     document.querySelectorAll('.tab').forEach(function(b){b.classList.toggle('on',b.dataset.t===t);});
     if(t==='dash')renderDash();
+    if(t==='tax')renderTax();
   }
   document.querySelectorAll('.tab').forEach(function(b){b.addEventListener('click',function(){switchTab(b.dataset.t);});});
 
