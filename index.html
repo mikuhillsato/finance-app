@@ -106,7 +106,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     tax:{ uri:6400000, keihi:960000, nenkin:210000, kokuho2026:17000, kyosaiY:120000, idecoY:0, genzen:560000,
       jigyoTax:true, rJuminzei:0.10, juminFlat:6000, rKokuho:0.096, kokuhoFlat:55000, kokuhoCap:890000 } };
   var state=JSON.parse(JSON.stringify(DEF));
-  var mem=null, active='dash', selMonth=null, lastImport='';
+  var mem=null, active='dash', selMonth=null, lastImport='', dashMonth='';
 
   function $(id){return document.getElementById(id);}
   function yen(n){return '¥'+Math.round(n).toLocaleString();}
@@ -253,16 +253,17 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     }
     return {rows:rows,maxV:maxV};
   }
-  function buildBars(year){
+  function buildBars(year,selMo){
     var d=monthRows(year),rows=d.rows,maxV=d.maxV;
     var W=340,H=188,pT=10,pB=18,pL=4,pR=4,pw=W-pL-pR,pH=H-pT-pB,zero=pT+pH*0.52,upH=zero-pT-4,dnH=(pT+pH)-zero-4;
     var gap=pw/12, bw=gap*0.54;
     var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;">';
-    rows.forEach(function(r,i){var cx=pL+gap*i+gap/2,x=cx-bw/2;
-      if(r.cur)s+='<rect x="'+(cx-gap/2+1).toFixed(1)+'" y="'+pT+'" width="'+(gap-2).toFixed(1)+'" height="'+pH.toFixed(1)+'" fill="var(--accent)" opacity="0.10" rx="5"/>';
+    rows.forEach(function(r,i){var cx=pL+gap*i+gap/2,x=cx-bw/2,on=(r.mo===selMo);
+      if(on)s+='<rect x="'+(cx-gap/2+1).toFixed(1)+'" y="'+pT+'" width="'+(gap-2).toFixed(1)+'" height="'+pH.toFixed(1)+'" fill="var(--accent)" opacity="0.14" rx="5"/>';
       if(r.inc>0){var h=upH*r.inc/maxV;s+='<rect x="'+x.toFixed(1)+'" y="'+(zero-h).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="#36B37E" rx="2"/>';}
       var yy=zero; r.stacks.forEach(function(st){var h=dnH*st.v/maxV;s+='<rect x="'+x.toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0.6,h).toFixed(1)+'" fill="'+catColor(st.c)+'"/>';yy+=h;});
-      s+='<text x="'+cx.toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="8.5" fill="'+(r.cur?'var(--accent)':'var(--faint)')+'">'+r.mo+'</text>';
+      s+='<text x="'+cx.toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" font-size="8.5" fill="'+(on?'var(--accent)':'var(--faint)')+'" style="font-weight:'+(on?'700':'400')+';">'+r.mo+'</text>';
+      s+='<rect x="'+(cx-gap/2).toFixed(1)+'" y="0" width="'+gap.toFixed(1)+'" height="'+H+'" fill="transparent" style="cursor:pointer;" data-mo="'+r.mo+'"></rect>';
     });
     s+='<line x1="'+pL+'" y1="'+zero.toFixed(1)+'" x2="'+(W-pR)+'" y2="'+zero.toFixed(1)+'" stroke="var(--line)" stroke-width="1"/>';
     s+='</svg>';
@@ -270,7 +271,14 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   }
   function renderDash(){
     var c=curCum(), g=activeGoal(), tc=taxCalc(), cf=cashflow();
-    var year=parseKey(nowKey()).y, now=nowKey(), lo=ledgerOf(now);
+    var now=nowKey();
+    if(!dashMonth){ dashMonth=now;
+      if(!(state.months[now]&&state.months[now].exp&&state.months[now].exp.length)){
+        var we=Object.keys(state.months).filter(function(m){return state.months[m].exp&&state.months[m].exp.length;}).sort();
+        if(we.length)dashMonth=we[we.length-1];
+      }
+    }
+    var selKey=dashMonth, selY=parseKey(selKey).y, selMo=parseKey(selKey).m, year=selY, lo=ledgerOf(selKey);
     var hero;
     if(g){
       hero='<div class="hero">'
@@ -285,7 +293,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     // 収支サマリー（今月・年間）
     var mInc=lo.income,mExp=lo.exp,mBal=mInc-mExp;
     var yInc=0,yExp=0; for(var mo=1;mo<=12;mo++){var k=year+'-'+pad(mo);var rr=state.months[k];if(!rr)continue;yInc+=ledgerOf(k).income;yExp+=ledgerOf(k).exp;}
-    var summary='<div class="card"><p class="eb">'+label(now)+'の収支</p>'
+    var summary='<div class="card"><p class="eb">'+label(selKey)+'の収支</p>'
       +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;"><span class="num" style="font-size:26px;font-weight:600;color:'+(mBal>=0?'var(--text)':'var(--warn)')+';">'+(mBal<0?'−':'')+yen(Math.abs(mBal))+'</span>'
       +'<span class="l" style="font-size:13px;">＝ 収入 '+yen(mInc)+' − 支出 '+yen(mExp)+'</span></div>'
       +'<div style="margin-top:12px;padding-top:10px;border-top:0.5px solid var(--line);display:flex;justify-content:space-between;font-size:13px;"><span class="l">'+year+'年の収支</span><span class="num" style="color:'+(yInc-yExp>=0?'var(--accent)':'var(--warn)')+';font-weight:600;">'+((yInc-yExp)<0?'−':'')+yen(Math.abs(yInc-yExp))+'</span></div>'
@@ -294,14 +302,10 @@ textarea{width:100%;min-height:90px;resize:vertical;}
     var present={}; for(var mo=1;mo<=12;mo++){var k=year+'-'+pad(mo);var r=state.months[k];if(r&&r.exp)r.exp.forEach(function(x){present[catKey(x)]=1;});}
     var legend='<span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:#36B37E;display:inline-block;"></span>収入</span>';
     Object.keys(present).forEach(function(cc){legend+=' <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:9px;height:9px;border-radius:2px;background:'+catColor(cc)+';display:inline-block;"></span>'+cc+'</span>';});
-    var bars='<div class="card"><p class="eb">月次の収支（'+year+'年）</p>'+buildBars(year)
+    var bars='<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;"><p class="eb">月次の収支（'+year+'年）</p><span style="font-size:11px;color:var(--faint);">月をタップで切替</span></div>'+buildBars(year,selMo)
       +'<div style="display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:8px;font-size:11px;color:var(--muted);">'+legend+'</div></div>';
-    // 支出の内訳（今月。なければ直近の支出がある月）
-    var bdMonth=now;
-    if(!(state.months[now]&&state.months[now].exp&&state.months[now].exp.length)){
-      var withExp=Object.keys(state.months).filter(function(m){return state.months[m].exp&&state.months[m].exp.length;}).sort();
-      if(withExp.length)bdMonth=withExp[withExp.length-1];
-    }
+    // 支出の内訳（選択中の月）
+    var bdMonth=selKey;
     var rNow=state.months[bdMonth], byc={},tot=0;
     if(rNow&&rNow.exp){rNow.exp.forEach(function(x){var cc=catKey(x);byc[cc]=(byc[cc]||0)+(+x.amt||0);tot+=(+x.amt||0);});}
     var arr=Object.keys(byc).map(function(cc){return {c:cc,v:byc[cc]};}).sort(function(a,b){return b.v-a.v;});
@@ -326,6 +330,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
       +'<div class="row"><span class="l">2027の税の山（概算）</span><span class="num">'+man(tc.mountain)+'</span></div>'
       +'<div class="row"><span class="l">予備＋還付との差</span><span class="num" style="color:'+(tc.gap>=0?'var(--accent)':'var(--warn)')+';">'+(tc.gap>=0?'＋':'−')+man(Math.abs(tc.gap))+'</span></div></div>';
     $('dash').innerHTML=hero+summary+bars+expCard+chart+balance+breakdown;
+    document.querySelectorAll('#dash [data-mo]').forEach(function(el){el.addEventListener('click',function(){dashMonth=year+'-'+pad(+el.dataset.mo);renderDash();});});
   }
 
   /* ---------- INPUT ---------- */
