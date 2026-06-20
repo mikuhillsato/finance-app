@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Money — 個人財務管理</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
 <style>
 :root{
   --bg:#FBFAF7; --card:#ffffff; --text:#2C2C2A; --muted:#6b6a64; --faint:#9b9a93;
@@ -63,6 +64,16 @@ textarea{width:100%;min-height:90px;resize:vertical;}
 .mini .v{font-variant-numeric:tabular-nums;font-weight:600;font-size:15px;}
 .mini .k{font-size:11px;color:var(--muted);margin-top:2px;}
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
+.card{border-radius:18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);}
+.hero{background:linear-gradient(135deg,#0E5C44 0%,#1D9E75 52%,#3FD68B 100%);color:#fff;border:none;border-radius:22px;padding:22px 20px;margin-bottom:16px;box-shadow:0 12px 30px rgba(29,158,117,0.30);}
+.hero .eb{color:rgba(255,255,255,0.72);}
+.hero .big{color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",sans-serif;font-weight:600;letter-spacing:-0.02em;margin:2px 0 0;}
+.hero .bar{height:10px;background:rgba(255,255,255,0.25);border:none;margin-top:14px;}
+.hero .fill{background:#fff;}
+.hero .cap{color:rgba(255,255,255,0.9);}
+.btn{background:linear-gradient(135deg,#1D9E75,#34D399);box-shadow:0 4px 14px rgba(29,158,117,0.28);}
+.btn.ghost{background:transparent;box-shadow:none;}
+.brand{background:linear-gradient(135deg,#0E5C44,#1D9E75);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
 </style>
 </head>
 <body>
@@ -92,7 +103,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   var THRESHOLDS=[900000,2150000,2750000,3250000];
   var GNAMES=['生活防衛 90万','結婚 125万','生活防衛 ＋60万','出産 50万'];
   var DEF={ start:'2026-01', taxReserve:375000, planCash:60000, planKyosai:10000, planNisa:10000, months:{},
-    tax:{ uri:4780000, keihi:960000, nenkin:210000, kokuho2026:17000, kyosaiY:120000, idecoY:0, genzen:340000,
+    tax:{ uri:6400000, keihi:960000, nenkin:210000, kokuho2026:17000, kyosaiY:120000, idecoY:0, genzen:560000,
       jigyoTax:true, rJuminzei:0.10, juminFlat:6000, rKokuho:0.096, kokuhoFlat:55000, kokuhoCap:890000 } };
   var state=JSON.parse(JSON.stringify(DEF));
   var mem=null, active='dash', selMonth=null;
@@ -166,35 +177,73 @@ textarea{width:100%;min-height:90px;resize:vertical;}
   }
 
   /* ---------- DASHBOARD ---------- */
+  function buildChart(){
+    var n=Math.max(12, between(state.start,nowKey())+2); if(n>36)n=36;
+    var plan=[],pCash=0,pNisa=0,pR=false;
+    for(var i=0;i<n;i++){pCash+=state.planCash;pNisa+=state.planNisa;if(pCash>=900000)pR=true;plan.push(pCash+(pR?pNisa:0));}
+    var actByIdx={},aCash=0,aNisa=0,aR=false,lastIdx=-1;
+    Object.keys(state.months).filter(function(m){return state.months[m].cashSaved!=null;}).sort().forEach(function(m){
+      var co=contribOf(m); if(!co)return; aCash+=co.cash; aNisa+=co.nisa; if(aCash>=900000)aR=true;
+      var idx=between(state.start,m); if(idx>=0&&idx<n){actByIdx[idx]=aCash+(aR?aNisa:0); if(idx>lastIdx)lastIdx=idx;}
+    });
+    var act=[],carry=0;
+    for(var i=0;i<n;i++){ if(actByIdx[i]!=null)carry=actByIdx[i]; act.push(i<=lastIdx?carry:null); }
+    var g=activeGoal(), gt=g?g.th:THRESHOLDS[THRESHOLDS.length-1];
+    var maxAct=0; act.forEach(function(v){if(v!=null&&v>maxAct)maxAct=v;});
+    var yMax=Math.max(plan[n-1],maxAct,gt,900000)*1.12;
+    var W=340,H=156,pL=8,pR2=8,pT=14,pB=22,pw=W-pL-pR2,ph=H-pT-pB;
+    function X(i){return n<=1?pL+pw/2:pL+pw*i/(n-1);}
+    function Y(v){return pT+ph*(1-Math.min(1,v/yMax));}
+    var planPts=plan.map(function(v,i){return X(i).toFixed(1)+','+Y(v).toFixed(1);}).join(' ');
+    var actIdxs=[]; for(var i=0;i<n;i++){if(act[i]!=null)actIdxs.push(i);}
+    var yg=Y(gt);
+    var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;overflow:visible;">';
+    s+='<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1D9E75" stop-opacity="0.28"/><stop offset="100%" stop-color="#1D9E75" stop-opacity="0"/></linearGradient></defs>';
+    s+='<line x1="'+pL+'" y1="'+yg.toFixed(1)+'" x2="'+(W-pR2)+'" y2="'+yg.toFixed(1)+'" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>';
+    s+='<text x="'+(W-pR2)+'" y="'+(yg-4).toFixed(1)+'" text-anchor="end" font-size="9" fill="var(--faint)">'+(g?g.name:'目標')+'</text>';
+    s+='<polyline points="'+planPts+'" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.7"/>';
+    if(actIdxs.length){
+      var areaPts=actIdxs.map(function(i){return X(i).toFixed(1)+','+Y(act[i]).toFixed(1);}).join(' ');
+      var x0=X(actIdxs[0]),xL=X(actIdxs[actIdxs.length-1]),base=(pT+ph).toFixed(1);
+      s+='<polygon points="'+x0.toFixed(1)+','+base+' '+areaPts+' '+xL.toFixed(1)+','+base+'" fill="url(#ag)"/>';
+      s+='<polyline points="'+areaPts+'" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+      var li=actIdxs[actIdxs.length-1];
+      s+='<circle cx="'+X(li).toFixed(1)+'" cy="'+Y(act[li]).toFixed(1)+'" r="3.5" fill="var(--accent)"/>';
+    }
+    s+='<text x="'+pL+'" y="'+(H-6)+'" font-size="9" fill="var(--faint)">'+label(state.start).replace('年','/').replace('月','')+'</text>';
+    s+='<text x="'+(W-pR2)+'" y="'+(H-6)+'" text-anchor="end" font-size="9" fill="var(--faint)">'+label(addMonth(state.start,n-1)).replace('年','/').replace('月','')+'</text>';
+    s+='</svg>';
+    return s;
+  }
   function renderDash(){
-    var c=curCum(), sb=shouldBe(), g=activeGoal();
+    var c=curCum(), sb=shouldBe(), g=activeGoal(), tc=taxCalc();
     var diff=c.eligible-sb.eligible;
     var hero;
     if(g){
-      hero='<div class="card">'
-        +'<p class="eb">直近ゴール</p>'
-        +'<div style="display:flex;align-items:baseline;gap:12px;"><p class="big" style="font-size:46px;color:var(--accent);">'+g.pct+'<span style="font-size:22px;">%</span></p><span style="font-size:14px;color:var(--muted);">'+g.name+'</span></div>'
-        +'<div class="bar" style="height:12px;"><div class="fill" style="width:'+g.pct+'%"></div></div>'
-        +'<p class="cap">あと '+man(g.remain)+''+(g.eta?' ・ このペースで '+label(g.eta)+' 到達予定':'')+'</p>'
+      var chip='<span style="font-size:12px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,0.18);color:#fff;white-space:nowrap;">'+(diff>=0?'計画より ＋':'計画より −')+man(Math.abs(diff))+'</span>';
+      hero='<div class="hero">'
+        +'<p class="eb">直近ゴール ・ '+g.name+'</p>'
+        +'<p class="big" style="font-size:52px;">'+g.pct+'<span style="font-size:24px;">%</span></p>'
+        +'<div class="bar"><div class="fill" style="width:'+g.pct+'%"></div></div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;"><span class="cap" style="margin:0;">あと '+man(g.remain)+(g.eta?' ・ '+label(g.eta):'')+'</span>'+chip+'</div>'
         +'</div>';
     } else {
-      hero='<div class="card"><p class="eb">ゴール</p><p class="big" style="font-size:32px;color:var(--accent);">全ゴール達成 🎉</p><p class="cap">次の目標を設定できます。</p></div>';
+      hero='<div class="hero"><p class="eb">ゴール</p><p class="big" style="font-size:34px;">全ゴール達成 🎉</p><p class="cap">次の目標を設定できます。</p></div>';
     }
-    var diffCard='<div class="card"><p class="eb">計画との差</p>'
-      +'<div class="row"><span class="l">本来あるべき累計（今）</span><span class="num">'+man(sb.eligible)+'</span></div>'
-      +'<div class="row"><span class="l">実際の累計（現状）</span><span class="num" style="color:var(--accent);font-weight:600;">'+man(c.eligible)+'</span></div>'
-      +'<div class="row tot"><span>'+(diff>=0?'計画より先行':'計画より遅れ')+'</span><span class="num" style="color:'+(diff>=0?'var(--accent)':'var(--warn)')+';">'+(diff>=0?'＋':'−')+man(Math.abs(diff))+'</span></div>'
-      +'</div>';
+    var chart='<div class="card"><p class="eb">貯金の推移（実績 vs 目標）</p>'+buildChart()
+      +'<div style="display:flex;gap:16px;margin-top:10px;font-size:12px;color:var(--muted);align-items:center;">'
+      +'<span><span style="display:inline-block;width:14px;border-top:2.5px solid var(--accent);vertical-align:middle;"></span> 実績</span>'
+      +'<span><span style="display:inline-block;width:14px;border-top:2px dashed var(--faint);vertical-align:middle;"></span> 目標</span>'
+      +'<span style="margin-left:auto;font-weight:600;color:var(--text);">現状 '+man(c.eligible)+'</span></div></div>';
     var breakdown='<div class="card"><p class="eb">内訳</p><div class="split3">'
       +'<div class="mini"><div class="v">'+man(c.cash)+'</div><div class="k">現金</div></div>'
       +'<div class="mini"><div class="v">'+man(c.nisa)+'</div><div class="k">NISA</div></div>'
       +'<div class="mini"><div class="v">'+man(c.ky)+'</div><div class="k">共済（老後）</div></div>'
       +'</div>'
-      +'<div class="row" style="margin-top:10px;"><span class="l">2027税の予備（隔離）</span><span class="num">'+man(state.taxReserve)+'</span></div>'
-      +'<div class="row"><span class="l">2027の税の山（概算）</span><span class="num">'+man(taxCalc().mountain)+'</span></div>'
-      +'<div class="row"><span class="l">予備＋還付との差</span><span class="num" style="color:'+(taxCalc().gap>=0?'var(--accent)':'var(--warn)')+';">'+(taxCalc().gap>=0?'＋':'−')+man(Math.abs(taxCalc().gap))+'</span></div>'
-      +'<p class="note" style="margin-top:6px;">NISAは生活防衛90万の達成後にゴールへ充当。共済と税予備はゴールの計算には含めません。</p>'
-      +'</div>';
+      +'<div class="row" style="margin-top:12px;"><span class="l">2027税の予備（隔離）</span><span class="num">'+man(state.taxReserve)+'</span></div>'
+      +'<div class="row"><span class="l">2027の税の山（概算）</span><span class="num">'+man(tc.mountain)+'</span></div>'
+      +'<div class="row"><span class="l">予備＋還付との差</span><span class="num" style="color:'+(tc.gap>=0?'var(--accent)':'var(--warn)')+';">'+(tc.gap>=0?'＋':'−')+man(Math.abs(tc.gap))+'</span></div>'
+      +'<p class="note" style="margin-top:6px;">NISAは生活防衛90万の達成後にゴールへ充当。共済と税予備はゴールに含めません。</p></div>';
     var cm=nowKey(), lo=ledgerOf(cm);
     var thisMonth='<div class="card"><p class="eb">今月（'+label(cm)+'）</p>'
       +'<div class="row"><span class="l">収入</span><span class="num">'+yen(lo.income)+'</span></div>'
@@ -203,7 +252,7 @@ textarea{width:100%;min-height:90px;resize:vertical;}
          ?'<div class="row tot"><span>現金貯金（確定）</span><span class="num" style="color:'+(lo.cashSaved>=0?'var(--accent)':'var(--warn)')+';">'+yen(lo.cashSaved)+'</span></div>'
          :'<div class="row tot"><span>手残りの目安</span><span class="num">'+yen(lo.suggested)+'</span></div><p class="note">「入力」タブで現金貯金を確定すると累計に反映されます。</p>')
       +'</div>';
-    $('dash').innerHTML=hero+diffCard+breakdown+thisMonth;
+    $('dash').innerHTML=hero+chart+breakdown+thisMonth;
   }
 
   /* ---------- INPUT ---------- */
